@@ -2,6 +2,10 @@
 
 This is a hands-on lab to demonstrate [SQL Always On](https://learn.microsoft.com/en-us/sql/database-engine/availability-groups/windows/overview-of-always-on-availability-groups-sql-server?view=sql-server-ver17) capabilities using [Windows Server Failover Clustering (WSFC)](https://learn.microsoft.com/en-us/sql/sql-server/failover-clusters/windows/windows-server-failover-clustering-wsfc-with-sql-server?view=sql-server-ver17).
 
+This is the high level view of the environment.
+
+<img src=../screenshots/high-level-diagram.png>
+
 📖 Please read before proceeding.
 
 This script, should you choose to run the main function, will self-destruct your computer in five seconds.
@@ -75,7 +79,7 @@ For more (basic) information how to setup pfSense and configure pfSense, check o
 
 You need a decent Windows 11 host machine, with at least:
 - 60GB of empty storage space
-   - SSD is highly recommended here, because optical disks [sweats](screenshots/non-ssd-disk-usage.png)🥵
+   - SSD is highly recommended here, because optical disks [sweats](../screenshots/non-ssd-disk-usage.png)🥵
 - 64-bit processor with minimum 8 cores
 - 8GB of RAM
 - UEFI capable and Secure Boot support   
