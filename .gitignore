@@ -1,0 +1,32 @@
+# Ignore SQL Server backup and data files
+*.bak
+*.mdf
+*.ldf
+
+# Ignore user-specific files
+*.user
+*.suo
+
+# Ignore logs
+*.log
+
+# Ignore temp files
+*.tmp
+*.temp
+~*
+
+# Ignore VSCode settings
+.vscode/
+
+# Ignore environment files
+.env
+
+# Ignore node_modules if using JavaScript tooling
+node_modules/
+
+# Ignore package management folders
+packages/
+
+# Ignore build output
+bin/
+obj/
