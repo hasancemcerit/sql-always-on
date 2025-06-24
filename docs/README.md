@@ -186,8 +186,8 @@ This is the whole idea of the setup. To see how SQL Always on handles different 
 | 1 | Async node (secondary replica) is down | No downtime | Automatic | None |
 | 2 | Sync node (secondary replica) is down | No downtime | Automatic | None |
 | 3 | Sync node (primary replica) is down | Minimum downtime | Automatic | None |
-| 4 | Both secondary nodes are down | Downtime | Manual Fix #1 | Less Likely |
-| 5 | Both primary & secondary nodes are down | Downtime | Manual Fix #2 | Likely |
+| 4 | Both secondary nodes are down | Downtime | Manual Fix #1 | Not Likely |
+| 5 | Both primary & secondary nodes are down | Downtime | Manual Fix #2 | Less Likely |
 
 #### Fix #1
 Connect to primary node, and run:
