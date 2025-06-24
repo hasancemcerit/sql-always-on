@@ -79,7 +79,7 @@ For more (basic) information how to setup pfSense and configure pfSense, check o
 
 You need a decent Windows 11 host machine, with at least:
 - 60GB of empty storage space
-   - SSD is highly recommended here, because optical disks [sweats](../screenshots/non-ssd-disk-usage.png)🥵
+   - SSD is highly recommended here, because optical disk [sweats](../screenshots/non-ssd-disk-usage.png)🥵
 - 64-bit processor with minimum 8 cores
 - 8GB of RAM
 - UEFI capable and Secure Boot support   

@@ -4,7 +4,7 @@ $ErrorActionPreference = "Stop"
 $VerbosePreference = "SilentlyContinue"
 
 # some sensible defaults in case the script is run without parameters
-$Script:DownloadPath = "D:\downloads\os"
+$Script:DownloadPath = "$($env:USERPROFILE)\Downloads"
 $Script:HddPath = "C:\hdd"
 $Script:ExternalSwitch = "HyperV-External"
 $Script:InternalSwitch = "HyperV-Internal"
