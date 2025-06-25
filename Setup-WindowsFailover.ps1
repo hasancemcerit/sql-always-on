@@ -56,24 +56,25 @@ function Assert-VMSwitches {
 
     process {
         $physicalNet = Get-NetAdapter -Physical | Where-Object Status -eq Up | Sort-Object LinkSpeed, ifIndex | Select-Object -First 1
-        $externalSwitch = Get-VMSwitch -SwitchType External -ErrorAction SilentlyContinue
+        $externalVMSwitch = Get-VMSwitch -SwitchType External -ErrorAction SilentlyContinue
         $VerbosePreference = $verbose
 
-        if(-not $externalSwitch) {
+        if(-not $externalVMSwitch) {
             Write-Warning "You will temporarily loose internet connection here!"
             New-VMSwitch -Name "$Script:ExternalSwitch" -NetAdapterName $physicalNet.Name -Verbose:$VerbosePreference -Confirm
+            Get-NetAdapter | Where-Object Name -Like "*$($ExternalSwitch)*" | Rename-NetAdapter -NewName $ExternalSwitch -Verbose:$VerbosePreference
         }
-        elseif ([guid]::Parse($externalSwitch.NetAdapterInterfaceGuid) -ne [guid]::Parse($physicalNet.InterfaceGuid)) {
+        elseif ([guid]::Parse($externalVMSwitch.NetAdapterInterfaceGuid) -ne [guid]::Parse($physicalNet.InterfaceGuid)) {
             Write-Warning "You will temporarily loose internet connection here!"
             Set-VMSwitch "$Script:ExternalSwitch" -NetAdapterName $physicalNet.Name -Verbose:$VerbosePreference -Confirm
         }
         Write-Host "External`t🌎"
 
-        $internalSwitch = Get-VMSwitch -SwitchType Internal -Name $InternalSwitch -ErrorAction SilentlyContinue
-        if(-not $internalSwitch) {
+        $internalVMSwitch = Get-VMSwitch -SwitchType Internal -Name $InternalSwitch -ErrorAction SilentlyContinue
+        if(-not $internalVMSwitch) {
             New-VMSwitch -SwitchType Internal -Name "$Script:InternalSwitch" -Verbose:$VerbosePreference
             Get-NetAdapter | Where-Object Name -Like "*$($InternalSwitch)*" | Rename-NetAdapter -NewName $InternalSwitch -Verbose:$VerbosePreference
-            New-NetIPAddress -InterfaceAlias "$InternalSwitch" -IPAddress "192.168.200.1" -AddressFamily IPv4 -PrefixLength 24
+            New-NetIPAddress -InterfaceAlias "$InternalSwitch" -IPAddress "192.168.200.1" -AddressFamily IPv4 -PrefixLength 24 -Verbose:$VerbosePreference | Out-Null
             do {
                 Start-Sleep -Seconds 1
             } while ((Get-NetAdapter -Name "$InternalSwitch").State -eq "Up")

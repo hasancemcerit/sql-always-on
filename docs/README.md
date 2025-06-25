@@ -2,7 +2,7 @@
 
 This is a hands-on lab to demonstrate [SQL Always On](https://learn.microsoft.com/en-us/sql/database-engine/availability-groups/windows/overview-of-always-on-availability-groups-sql-server?view=sql-server-ver17) capabilities using [Windows Server Failover Clustering (WSFC)](https://learn.microsoft.com/en-us/sql/sql-server/failover-clusters/windows/windows-server-failover-clustering-wsfc-with-sql-server?view=sql-server-ver17).
 
-This is the high level view of the environment.
+Below is the high level view of the environment.
 
 <img src=../screenshots/high-level-diagram.png>
 
@@ -78,7 +78,7 @@ For more (basic) information how to setup pfSense and configure pfSense, check o
 <img src="https://skillicons.dev/icons?i=windows,vscode,powershell" />
 
 You need a decent Windows 11 host machine, with at least:
-- 60GB of empty storage space
+- 100GB of empty storage space
    - SSD is highly recommended here, because optical disk [sweats](../screenshots/non-ssd-disk-usage.png)🥵
 - 64-bit processor with minimum 8 cores
 - 8GB of RAM
@@ -231,17 +231,27 @@ flush DNS if necessary, and make sure that database failover is successful.
 
 ### Troubleshooting
 
-The Endpoints tab lists at least one endpoint that uses only Windows Authentication. However, the server instance might be running under a nondomain account. To use the listed endpoint, change the corresponding SQL Server service account to a domain account. To continue using the nondomain account, alter the endpoint to use a certificate.
+>No matching network interface found for resource 'availgroup01_10.20.20.144' IP address '10.20.20.144' (return code was '5035'). 
+If your cluster nodes span different subnets, this may be normal.
 
-The availability group is not ready for automatic failover. The primary replica and a secondary replica are configured for automatic failover, however, the secondary replica is not ready for an automatic failover. Possibly the secondary replica is unavailable, or its data synchronization state is currently not in the SYNCHRONIZED synchronization state.
+>The Endpoints tab lists at least one endpoint that uses only Windows Authentication. However, the server instance might be running under a nondomain account. To use the listed endpoint, change the corresponding SQL Server service account to a domain account. To continue using the nondomain account, alter the endpoint to use a certificate.
 
-WARNING: If you are running Windows PowerShell remotely, note that some failover clustering cmdlets do not work remotely.
+>The availability group is not ready for automatic failover. The primary replica and a secondary replica are configured for automatic failover, however, the secondary replica is not ready for an automatic failover. Possibly the secondary replica is unavailable, or its data synchronization state is currently not in the SYNCHRONIZED synchronization state.
+
+>WARNING: If you are running Windows PowerShell remotely, note that some failover clustering cmdlets do not work remotely.
 When possible, run the cmdlet locally and specify a remote computer as the target.
 To run the cmdlet remotely, try using the Credential Security Service Provider (CredSSP).
 All additional errors or warnings from this cmdlet might be caused by running it remotely.
 
-Error:: New-Cluster : Static address was given for the Cluster Name but no appropriate ClusterandClient network was found
+>Error:: New-Cluster : Static address was given for the Cluster Name but no appropriate ClusterandClient network was found
 to host it. Networks with default gateways are assigned ClusterAndClient role by default. Please check your networking settings
+
+
+> Cluster node 'win25-db03' has been quarantined by 'cluster nodes' and cannot join the > cluster. The node will be quarantined until '2025/06/24-16:45:39.446' and then the >node will automatically attempt to re-join the cluster. 
+>
+> Refer to the System and Application event logs to determine the issues on this node.  When the issue is resolved, quarantine can be manually cleared to allow the node to rejoin with the 'Start-ClusterNode –ClearQuarantine' Windows PowerShell cmdlet.
+
+Do what it says, login to quarantined node and: `Start-ClusterNode –ClearQuarantine`
 
 ### To-Do List
 
