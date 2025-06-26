@@ -500,13 +500,11 @@ function New-Win25DbServers {
                     /IACCEPTSQLSERVERLICENSETERMS /QUIET /INDICATEPROGRESS=true `
                     /SQLSYSADMINACCOUNTS="SQLDEMO\Administrator" /SQLSVCPASSWORD="$secretText" `
                     /TCPENABLED=1 /NPENABLED=1 /SQLTEMPDBFILECOUNT=2 /SQLTEMPDBFILESIZE=8
-                # TODO: Find a way to change service account successfully.
+                # change service account
                 $service = Get-WmiObject Win32_Service | Where-Object Name -eq "MSSQLSERVER"
                 $service.Change($null,$null,$null,$null,$null,$null,"SQLDEMO\Administrator","$secretText",$null, $null, $null)
                 Get-Service -Name "MSSQLSERVER" | Restart-Service -Verbose
                 $service | Select-Object Name,State,StartName
-                #New-NetFirewallRule -DisplayName "SQLServer Engine" -Direction Inbound -LocalPort 1433 -Protocol TCP -Action Allow -Profile Domain,Public,Private | Out-Null
-                #New-NetFirewallRule -DisplayName "SQLServer Browser" -Direction Inbound -LocalPort 1434 -Protocol UDP -Action Allow -Profile Domain,Public,Private | Out-Null
             }
             Remove-PSSession -Session $remoteSession
         }

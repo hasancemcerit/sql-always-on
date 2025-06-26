@@ -23,11 +23,11 @@ The corresponding function name in the main script file is included in `Function
 
 1. Install HyperV
    - `Enable-HyperV`
-2. Create 3 virtual HyperV switches
+2. Create 4 virtual HyperV switches
    - External (HyperV-External)
       - ⚠️ This is where you'll lose internet connection temporarily because your physical (ethernet or wi-fi) connection will be shared by this new external switch.
    - Internal (HyperV-Internal)
-   - 2 Private (Private-Lan10, PrivateLan20)
+   - 2 Private (Private-Lan10, Private-Lan20)
    - `Assert-VMSwitches`
 3. Download [Windows server evaluation](https://www.microsoft.com/en-us/evalcenter/evaluate-windows-server-2025) ISO/media and extract [Windows image (.WIM)](https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/capture-and-apply-windows-using-a-single-wim?view=windows-11) file
    - `Get-WindowsEvalImage`
@@ -78,7 +78,8 @@ For more (basic) information how to setup pfSense and configure pfSense, check o
 <img src="https://skillicons.dev/icons?i=windows,vscode,powershell" />
 
 You need a decent Windows 11 host machine, with at least:
-- 100GB of empty storage space
+- More than `80GB` of empty storage space
+   - Yes 8️⃣0️⃣. Each of these are full blown Windows 2025 servers. Even though, 4 of them uses Core edition with differencing virtual hard disks, it will add up.
    - SSD is highly recommended here, because optical disk [sweats](../screenshots/non-ssd-disk-usage.png)🥵
 - 64-bit processor with minimum 8 cores
 - 8GB of RAM
