@@ -501,10 +501,10 @@ function New-Win25DbServers {
                     /SQLSYSADMINACCOUNTS="SQLDEMO\Administrator" /SQLSVCPASSWORD="$secretText" `
                     /TCPENABLED=1 /NPENABLED=1 /SQLTEMPDBFILECOUNT=2 /SQLTEMPDBFILESIZE=8
                 # TODO: Find a way to change service account successfully.
-                #$service = Get-WmiObject Win32_Service | Where-Object Name -eq "MSSQLSERVER"
-                #$service.Change($null,$null,$null,$null,$null,$null,"SQLDEMO\Administrator","$secretText",$null, $null, $null)
-                #Get-Service -Name "MSSQLSERVER" | Restart-Service -Verbose
-                #$service | Select-Object Name,State,StartName
+                $service = Get-WmiObject Win32_Service | Where-Object Name -eq "MSSQLSERVER"
+                $service.Change($null,$null,$null,$null,$null,$null,"SQLDEMO\Administrator","$secretText",$null, $null, $null)
+                Get-Service -Name "MSSQLSERVER" | Restart-Service -Verbose
+                $service | Select-Object Name,State,StartName
                 #New-NetFirewallRule -DisplayName "SQLServer Engine" -Direction Inbound -LocalPort 1433 -Protocol TCP -Action Allow -Profile Domain,Public,Private | Out-Null
                 #New-NetFirewallRule -DisplayName "SQLServer Browser" -Direction Inbound -LocalPort 1434 -Protocol UDP -Action Allow -Profile Domain,Public,Private | Out-Null
             }
@@ -582,9 +582,8 @@ function New-Win25AppServer {
 function Set-FailoverCluster {
 
     $vmDbName = "win25-db01"
-    $domainAdmin = New-Object -TypeName System.Management.Automation.PSCredential("sqldemo\Administrator", ($SecurePass | ConvertTo-SecureString -AsPlainText -Force))
+    $domainAdmin = New-Object -TypeName System.Management.Automation.PSCredential("sqldemo\Administrator", $SecurePass)
     $remoteSession = New-PSSession -VMName $vmDbName -Credential $domainAdmin -Name $vmDbName
-
     Invoke-Command -Session $remoteSession {
         Write-Host "Installing Failover clustering management tools"
         Add-WindowsFeature -Name Failover-Clustering -IncludeManagementTools
@@ -662,7 +661,7 @@ function Set-FailoverCluster {
 
 function Deploy-SQLAlwaysOn {
     Get-PSSession | Remove-PSSession
-    $domainAdmin = New-Object -TypeName System.Management.Automation.PSCredential("sqldemo\Administrator", ($SecurePass | ConvertTo-SecureString -AsPlainText -Force))
+    $domainAdmin = New-Object -TypeName System.Management.Automation.PSCredential("sqldemo\Administrator", $SecurePass)
      1..3 | ForEach-Object {
         $vmDbName= "win25-db0$_"
         $remoteSession = New-PSSession -VMName $vmDbName -Credential $domainAdmin -Name $vmDbName
@@ -707,9 +706,18 @@ function Deploy-SQLAlwaysOn {
         Remove-PSSession -Session $remoteSession
     }
 
-    #TODO: Run generated SQL Script to create availability group, just like the wizard does from SQL Man. Studio
-    #availgroup01
-    #dblistener01=10.10.10.43, 10.20.20.43
+    # Run generated SQL Script to create availability group, just like the wizard does from SQL Man. Studio
+    $remoteSession = New-PSSession -VMName $vmDbName -Credential $domainAdmin -Name "win25-db01"
+    Get-ChildItem -Path sql -File -Filter *.sql | Copy-Item -Destination "C:\Users\Administrator.SQLDEMO\Documents\" -ToSession $remoteSession -Verbose
+    Invoke-Command -Session $remoteSession {
+        1..3 | ForEach-Object {
+            Invoke-Sqlcmd -ServerInstance "win25-db0$_" -Query "./01-enable-always-on.sql"
+        }
+        Invoke-Sqlcmd -ServerInstance "win25-db01" -Query "./02-create-availability-group.sql"
+        2..3 | ForEach-Object {
+            Invoke-Sqlcmd -ServerInstance "win25-db0$_" -Query "./03-join-availability-group.sql"
+        }
+    }
 }
 
 function Start-Provisioning {
@@ -760,7 +768,7 @@ PS C:\> Start-Provisioning -Verbose
 
         [Parameter(HelpMessage="Provide dynamically expanding (max) virtual hard disk size.")]
         [ValidateRange(20GB,64GB)]
-        [UInt64]$Script:DiskSize = 32GB,
+        [UInt64]$DiskSize = 32GB,
 
         [Parameter(HelpMessage="Provide public dns servers.")]
         [ValidateNotNullorEmpty()]

@@ -1,4 +1,5 @@
-:Connect {DB-NODE}
+USE [master]
+GO
 
 ALTER AVAILABILITY GROUP [availgroup01] JOIN;
 GO

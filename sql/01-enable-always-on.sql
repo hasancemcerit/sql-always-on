@@ -1,4 +1,3 @@
-:Connect {DB-NODE}
 USE [master]
 GO
 
