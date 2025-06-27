@@ -153,8 +153,8 @@ function Wait-WinRMSession {
     $credential = New-Object -TypeName System.Management.Automation.PSCredential($userName, $SecurePass)
     $maxWaitCycle = [int]($MaxTimeout / $SleepTime)
     do {
-        $remoteSession = New-PSSession -VMName $VMName -Credential $credential -Name $VMName -ErrorAction SilentlyContinue
         Write-Host "." -ForegroundColor DarkGray -NoNewline
+        $remoteSession = New-PSSession -VMName $VMName -Credential $credential -Name $VMName -ErrorAction SilentlyContinue
         Start-Sleep -Seconds $SleepTime
         if($remoteSession) {
             Write-Host "`t🔗"
@@ -256,8 +256,8 @@ function New-Win25VHD {
         $efiDrive = (Get-Partition -DiskNumber $diskNum | Where-Object Type -EQ "System").DriveLetter
         bcdboot.exe "${winDrive}:\Windows" /s ${efiDrive}: /f UEFI
 
-        Write-Verbose "Copying unattend.xml"
         $unattendFile = "unattend.xml"
+        Write-Verbose "Patching $unattendFile using $VMName & password"
         $pantherDir = "${winDrive}:\Windows\Panther"
         New-Item -ItemType Directory -Path $pantherDir -Force -Verbose:$VerbosePreference | Out-Null
         (Get-Content $unattendFile) -replace "{PASSWORD}", ($SecurePass | ConvertFrom-SecureString -AsPlainText) -replace "{COMPUTERNAME}", $VMName `
@@ -336,8 +336,8 @@ function Deploy-UnattendedXml {
         $disk = Mount-VHD -Path $win25Vhdx -PassThru -Verbose:$VerbosePreference
         $diskNum = ($disk | Get-Disk).Number
         $primaryDrive = (Get-Partition -DiskNumber $diskNum | Where-Object Size -GT 500MB).DriveLetter
-        Write-Verbose "Copying unattend.xml"
         $unattendFile = "unattend.xml"
+        Write-Verbose "Patching $unattendFile using $VMName & password"
         $pantherDir = "${primaryDrive}:\Windows\Panther"
         (Get-Content $unattendFile) -replace "{PASSWORD}", ($SecurePass | ConvertFrom-SecureString -AsPlainText) -replace "{COMPUTERNAME}", $VMName `
             | Out-File "$($pantherDir)\unattend.xml" -Force -Encoding utf8 -Verbose:$verbosePreference
