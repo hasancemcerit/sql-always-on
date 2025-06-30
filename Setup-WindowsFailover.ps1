@@ -229,7 +229,7 @@ function New-Win25VHD {
         [int]$EditionIndex
     )
 
-    $win25Vhdx = "$($HddPath)\$($VMName).vhdx"
+    $win25Vhdx = Join-Path -Path "$($HddPath)" -ChildPath "$($VMName).vhdx"
 
     if(-not (Test-Path $win25Vhdx)) {
         Write-Verbose "Creating new windows server VHDX: $win25Vhdx"
@@ -284,7 +284,7 @@ function New-Win25BaseVM {
         2 { "win25-std" }
         default { throw "Windows Server 2025 Datacenter is not supported yet." }
     }
-    $Script:Win25ParentVhdx = "$($HddPath)\$($vmBaseName).vhdx"
+    $Script:Win25ParentVhdx = Join-Path -Path "$($HddPath)" -ChildPath "$($vmBaseName).vhdx"
     # create vm and sysprep only once
     if(-not (Test-Path $Win25ParentVhdx)) {
         New-Win25VHD -VMName $vmBaseName -EditionIndex $EditionIndex
@@ -324,7 +324,7 @@ function Deploy-UnattendedXml {
         [int]$EditionIndex
     )
 
-    $win25Vhdx = "$($HddPath)\$($VMName).vhdx"
+    $win25Vhdx = Join-Path -Path "$($HddPath)" -ChildPath "$($VMName).vhdx"
     New-Win25BaseVM -EditionIndex $EditionIndex
 
     if(-not (Test-Path -Path $Win25ParentVhdx)) {
@@ -353,7 +353,7 @@ function New-Win25DC {
         [int]$EditionIndex
     )
     $vmDcName="win25-dc"
-    $win25DcPath = "$($HddPath)\$($vmDcName).vhdx"
+    $win25DcPath = Join-Path -Path "$($HddPath)" -ChildPath "$($vmDcName).vhdx"
 
     if(-not (Get-VM -Name $vmDcName -ErrorAction SilentlyContinue)) {
         Deploy-UnattendedXml -VMName $vmDcName -EditionIndex $EditionIndex
@@ -402,8 +402,8 @@ function New-Win25DC {
         #>
         Wait-ServerEvent -VMName $vmDcName -WaitWhile {
             (Get-PSSession -Name $vmDcName).State -eq "Opened" -and (Get-PSSession -Name $vmDcName).Availability -eq "Available"
-        } -TextMsg "$vmDcName is restarting" -ErrorMsg "max. wait time reached but $vmDcName has not been restarted yet." -MaxTimeout 60 -SleepTime 2
-        $remoteSession = Wait-WinRMSession -VMName $vmDcName -MaxTimeout 120 -SleepTime 5 -AsDomainAdmin
+        } -TextMsg "$vmDcName is restarting" -ErrorMsg "max. wait time reached but $vmDcName has not been restarted yet." -MaxTimeout 300 -SleepTime 2
+        $remoteSession = Wait-WinRMSession -VMName $vmDcName -MaxTimeout 120 -SleepTime 2 -AsDomainAdmin
         # test connectivity
         Write-Verbose "Testing network connections"
         $networkOk = Invoke-Command -Session $remoteSession -ScriptBlock {
@@ -446,8 +446,7 @@ function New-Win25DbServers {
     1..$DBServers | ForEach-Object {
         $vmDbName= "win25-db0$_"
         if(-not (Get-VM -Name $vmDbName -ErrorAction SilentlyContinue)) {
-            $win25DbPath = "$($HddPath)\$($vmDbName).vhdx"
-
+            $win25DbPath = Join-Path -Path "$($HddPath)" -ChildPath "$($vmDbName).vhdx"
             Deploy-UnattendedXml -VMName $vmDbName -EditionIndex $EditionIndex
 
             $switchSuffix = (10,20)[$_ % 3 -eq 0]
@@ -472,21 +471,24 @@ function New-Win25DbServers {
                     -DefaultGateway "10.$($lanIndex).$($lanIndex).1" | Out-Null
                 Set-DnsClientServerAddress -InterfaceAlias "Private-Lan$($lanIndex)" -ServerAddresses "10.10.10.53"
                 Set-NetConnectionProfile -InterfaceAlias "Private-Lan$($lanIndex)" -NetworkCategory Private
+                Start-Sleep -Seconds 5
             }
-            Start-Sleep -Seconds 10
             Write-Verbose (Invoke-Command -Session $remoteSession { ipconfig } | Out-String)
-            # install WSFC Role w/o Management Tools
-            Invoke-Command -Session $remoteSession { Add-WindowsFeature -Name Failover-Clustering }
             # join the domain
             Invoke-Command -Session $remoteSession -ArgumentList ($SecurePass | ConvertFrom-SecureString -AsPlainText) {
                 param($secretText)
+                Start-Sleep -Seconds 5
+                Test-NetConnection "sqldemo.local" -InformationLevel Quiet | Out-Null
+                nltest /dsgetdc:sqldemo.local
                 $domainAdmin = New-Object -TypeName System.Management.Automation.PSCredential("sqldemo\Administrator", ($secretText | ConvertTo-SecureString -AsPlainText -Force))
                 Add-Computer -DomainName "sqldemo.local" -Credential $domainAdmin -ErrorAction Stop
                 Write-Host "$($env:COMPUTERNAME) joined 'sqldemo.local' domain successfully 🤝" -ForegroundColor Green
             }
-            # restart needed after joining domain
+            # install WSFC Role w/o Management Tools
             Invoke-Command -Session $remoteSession {
+                Add-WindowsFeature -Name Failover-Clustering
                 Set-NetFirewallProfile -Profile Domain -Enabled False -Verbose
+                # restart needed after joining domain
                 Restart-Computer -Force
             }
             Wait-ServerEvent -VMName $vmDbName -WaitWhile {
@@ -496,15 +498,17 @@ function New-Win25DbServers {
             # install SQL Server
             Invoke-Command -Session $remoteSession -ArgumentList ($SecurePass | ConvertFrom-SecureString -AsPlainText) {
                 param($secretText)
+                Write-Host "Installing SQL Server 2022 on $($env:COMPUTERNAME). This might take a while..." -ForegroundColor Cyan
                 D:\setup.exe /ACTION="install" /FEATURES=SQLENGINE,REPLICATION /INSTANCENAME=MSSQLSERVER `
-                    /IACCEPTSQLSERVERLICENSETERMS /QUIET /INDICATEPROGRESS=true `
+                    /IACCEPTSQLSERVERLICENSETERMS /QUIET /INDICATEPROGRESS=false `
                     /SQLSYSADMINACCOUNTS="SQLDEMO\Administrator" /SQLSVCPASSWORD="$secretText" `
                     /TCPENABLED=1 /NPENABLED=1 /SQLTEMPDBFILECOUNT=2 /SQLTEMPDBFILESIZE=8
                 # change service account
                 $service = Get-WmiObject Win32_Service | Where-Object Name -eq "MSSQLSERVER"
-                $service.Change($null,$null,$null,$null,$null,$null,"SQLDEMO\Administrator","$secretText",$null, $null, $null)
+                $service.Change($null,$null,$null,$null,$null,$null,"SQLDEMO\Administrator","$secretText",$null, $null, $null) | Out-Null
                 Get-Service -Name "MSSQLSERVER" | Restart-Service -Verbose
                 $service | Select-Object Name,State,StartName
+                #Get-CimInstance Win32_Service -Filter "Name='MSSQLSERVER'" | Invoke-CimMethod -Name Change -Arguments @{StartName="LocalSystem"}
             }
             Remove-PSSession -Session $remoteSession
         }
@@ -520,7 +524,7 @@ function New-Win25AppServer {
         [int]$EditionIndex
     )
     $vmAppName= "win25-app01"
-    $win25AppPath = "$($HddPath)\$($vmAppName).vhdx"
+    $win25AppPath = Join-Path -Path "$($HddPath)" -ChildPath "$($vmAppName).vhdx"
 
     Deploy-UnattendedXml -VMName $vmAppName -EditionIndex $EditionIndex
 
@@ -542,18 +546,20 @@ function New-Win25AppServer {
     }
     Start-Sleep -Seconds 5
     Write-Verbose (Invoke-Command -Session $remoteSession { ipconfig } | Out-String)
-    # install WSFC Role w/Management Tools
-    Invoke-Command -Session $remoteSession { Add-WindowsFeature -Name Failover-Clustering -IncludeManagementTools }
     # join the domain
     Invoke-Command -Session $remoteSession -ArgumentList ($SecurePass | ConvertFrom-SecureString -AsPlainText) {
         param($secretText)
+        Test-NetConnection "sqldemo.local" -InformationLevel Quiet | Out-Null
+        nltest /dsgetdc:sqldemo.local
         $domainAdmin = New-Object -TypeName System.Management.Automation.PSCredential("sqldemo\Administrator", ($secretText | ConvertTo-SecureString -AsPlainText -Force))
         Add-Computer -DomainName "sqldemo.local" -Credential $domainAdmin
         Write-Host "$($env:COMPUTERNAME) joined 'sqldemo.local' domain successfully 🤝" -ForegroundColor Green
     }
-    # restart needed after joining domain
+    # install WSFC Role w/Management Tools
     Invoke-Command -Session $remoteSession {
+        Add-WindowsFeature -Name Failover-Clustering -IncludeManagementTools
         Set-NetFirewallProfile -Profile Domain -Enabled False -Verbose
+        # restart needed after joining domain
         Restart-Computer -Force
     }
     Wait-ServerEvent -VMName $vmAppName -WaitWhile {
@@ -561,23 +567,34 @@ function New-Win25AppServer {
     } -TextMsg "$vmAppName is restarting" -ErrorMsg "max. wait time reached but $vmAppName has not been restarted yet." -MaxTimeout 40 -SleepTime 2
     $remoteSession = Wait-WinRMSession -VMName $vmAppName -MaxTimeout 120 -SleepTime 5 -AsDomainAdmin
     Invoke-Command -Session $remoteSession {
+        # only way I could find to upgrade winget to latest version
+        Invoke-WebRequest "https://github.com/microsoft/winget-cli/releases/download/v1.11.400/DesktopAppInstaller_Dependencies.zip" `
+        -UseBasicParsing -OutFile "DesktopAppInstaller_Dependencies.zip"
+        Expand-Archive -Path "DesktopAppInstaller_Dependencies.zip"
+        Add-AppxPackage https://aka.ms/getwinget -DependencyPath .\DesktopAppInstaller_Dependencies\x64\*
+        Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe
+        Add-AppxPackage https://cdn.winget.microsoft.com/cache/source2.msix
+        winget source reset --force
+        Remove-Item -Path "DesktopAppInstaller_Dependencies.zip"
+        Remove-Item -Path "DesktopAppInstaller_Dependencies" -Recurse
+        # install pwsh
+        Write-Host "Installing latest PowerShell..." -ForegroundColor Cyan
+        winget install Microsoft.PowerShell --silent --source winget --disable-interactivity --accept-source-agreements --accept-package-agreements | Out-Null
+        Write-Host "PowerShell is installed." -ForegroundColor Green
         # install SQL Management Studio 21
-        Write-Host "Starting SQL Server Management Studio 21 installation in the background" -ForegroundColor Cyan
-        Start-Job -ScriptBlock {
-            winget install -id Microsoft.SQLServerManagementStudio.21 --silent --disable-interactivity --accept-package-agreements --accept-source-agreements
-        }
-        Write-Host "If fails, you can manually re-install using installer file on the desktop." -ForegroundColor Cyan
-        Invoke-WebRequest -Uri "https://aka.ms/ssms/21/release/vs_SSMS.exe" -OutFile "$($Env:USERPROFILE)\Desktop\vs_SSMS.exe"
-        Write-Host "Installing latest PowerShell also in the background" -ForegroundColor Cyan
-        Start-Job -ScriptBlock {
-            winget install --id Microsoft.PowerShell --silent --source winget
-        }
+        Write-Host "Starting SQL Server Management Studio 21 installation. This might take some time..." -ForegroundColor Cyan
+        winget install Microsoft.SQLServerManagementStudio.21 --silent --disable-interactivity --accept-source-agreements --accept-package-agreements | Out-Null
+        Write-Host "SQL Server Management Studio 21 is installed." -ForegroundColor Green
+        #Write-Host "If fails, you can manually re-install using installer file on the desktop." -ForegroundColor Cyan
+        #Invoke-WebRequest -Uri "https://aka.ms/ssms/21/release/vs_SSMS.exe" -OutFile "$($Env:USERPROFILE)\Desktop\vs_SSMS.exe"
     }
     Remove-PSSession -Session $remoteSession
     Write-Host  "App01`t📐"
 }
 
 function Set-FailoverCluster {
+    [CmdletBinding()]
+    param ()
 
     $vmDbName = "win25-db01"
     $domainAdmin = New-Object -TypeName System.Management.Automation.PSCredential("sqldemo\Administrator", $SecurePass)
@@ -599,8 +616,8 @@ function Set-FailoverCluster {
         $clusterNodes | Out-Default
         Write-Host "Waiting for cluster to be online" -ForegroundColor Cyan -NoNewline
         $maxWaitCycle = 10
+        $clusterGroup = Get-Cluster | Where-Object Name -eq $ClusterName | Get-ClusterGroup | Where-Object Name -eq "Cluster Group"
         do {
-            $clusterGroup = Get-Cluster | Where-Object Name -eq $ClusterName | Get-ClusterGroup | Where-Object Name -eq "Cluster Group"
             if($clusterGroup.State -eq "Online") { break }
             Write-Host "." -ForegroundColor Cyan -NoNewline
             Start-Sleep -Seconds 2
@@ -608,18 +625,20 @@ function Set-FailoverCluster {
                 Write-Host
                 Write-Error "max. wait time reached but $ClusterName has not been online yet." -ErrorAction Stop
             }
+            $clusterGroup = Get-Cluster | Where-Object Name -eq $ClusterName | Get-ClusterGroup | Where-Object Name -eq "Cluster Group"
         } while ($true)
         # change some cluster perameters for multi-subnet clusters
-        $clusterResource = Get-ClusterResource | Where-Object { $_.ResourceType -eq "Network Name" } | Where-Object { $_.Name -ne "Cluster Name" }
+        $clusterResource = Get-ClusterResource | Where-Object { $_.ResourceType -eq "Network Name" }
         $clusterResource | Get-ClusterParameter | Where-Object { $_.Name -eq "HostRecordTTL" -or $_.Name -eq "RegisterAllProvidersIP" }
         $clusterResource | Set-ClusterParameter RegisterAllProvidersIP 0
         $clusterResource | Set-ClusterParameter HostRecordTTL 60
         $clusterResource | Get-ClusterParameter | Where-Object { $_.Name -eq "HostRecordTTL" -or $_.Name -eq "RegisterAllProvidersIP" }
+        # TODO: These should run after AG creation
         # updating Lease timeout
-        $clusterAG = Get-ClusterResource | Where-Object { $_.ResourceType -like "SQL Server Availability Group" }
-        $clusterAG | Get-ClusterParameter LeaseTimeout
-        $clusterAG | Set-ClusterParameter LeaseTimeout 30000
-        $clusterAG | Get-ClusterParameter LeaseTimeout
+        #$clusterAG = Get-ClusterResource | Where-Object { $_.ResourceType -like "SQL Server Availability Group" }
+        #$clusterAG | Get-ClusterParameter LeaseTimeout
+        #$clusterAG | Set-ClusterParameter LeaseTimeout 30000
+        #$clusterAG | Get-ClusterParameter LeaseTimeout
         # updating Subnet delays for multi-subnet clusters
         Get-Cluster | Format-List "*subnet*"
         (Get-Cluster).SameSubnetDelay = 1000
@@ -634,7 +653,7 @@ function Set-FailoverCluster {
         # simulate a failover by moving the cluster group to each node
         $ownerNode = (Get-ClusterOwnerNode -Group $clusterGroup | Select-Object -ExpandProperty OwnerNodes).Name
         Write-Host "Current Owner: $ownerNode" -ForegroundColor Green
-        $clusterNodes | Where-Object { $_ -notin $ownerNode.Name } | ForEach-Object {
+        $clusterNodes | Where-Object { $_ -notin $ownerNode } | ForEach-Object {
             Move-ClusterGroup -Name "Cluster Group" -Node $_.Name -Verbose -ErrorAction Stop
             Write-Host "Move-ClusterGroup to $($_.Name) is completed. Waiting for 5s..." -ForegroundColor Cyan
             Start-Sleep -Seconds 5
@@ -652,15 +671,35 @@ function Set-FailoverCluster {
         Get-ClusterOwnerNode -Group $clusterGroup
         Get-ClusterQuorum | Select-Object Cluster,QuorumResource,QuorumType
 
-        Write-Host "Health`t💖"
+        Write-Host "Cluster`t💖"
     }
     Remove-PSSession $remoteSession
 }
 
 function Deploy-SQLAlwaysOn {
+    [CmdletBinding()]
+    param ()
+
     Get-PSSession | Remove-PSSession
+    # need to manually register SPNs for SQL Server instances due to Service Account change
     $domainAdmin = New-Object -TypeName System.Management.Automation.PSCredential("sqldemo\Administrator", $SecurePass)
-     1..3 | ForEach-Object {
+    $remoteSession = New-PSSession -VMName "win25-dc" -Credential $domainAdmin -Name "win25-dc"
+    Invoke-Command -Session $remoteSession {
+        # register SPNs for SQL Server instances
+        1..3 | ForEach-Object {
+            # remove existing SPNs
+            setspn -D "MSSQLSvc/win25-db0$($_).sqldemo.local" "win25-db0$($_)"
+            setspn -D "MSSQLSvc/win25-db0$($_).sqldemo.local:1433" "win25-db0$($_)"
+            # add new SPNs
+            setspn -S "MSSQLSvc/win25-db0$($_).sqldemo.local:1433" sqldemo\Administrator
+            setspn -S "MSSQLSvc/win25-db0$($_).sqldemo.local" sqldemo\Administrator
+            setspn -S "MSSQLSvc/win25-db0$($_):1433" sqldemo\Administrator
+            setspn -S "MSSQLSvc/win25-db0$($_)" sqldemo\Administrator
+        }
+    }
+    Remove-PSSession $remoteSession
+    # now deploy SQL Always On Availability Group with listener
+    1..3 | ForEach-Object {
         $vmDbName= "win25-db0$_"
         $remoteSession = New-PSSession -VMName $vmDbName -Credential $domainAdmin -Name $vmDbName
         Invoke-Command -Session $remoteSession -ArgumentList $_ {
@@ -668,22 +707,25 @@ function Deploy-SQLAlwaysOn {
             # do this for db01 only
             if($index -eq 1) {
                 $BackupDir = "C:\Backups"
-                New-Item -Path $BackupDir -ItemType Directory
-                New-SmbShare -Name "DbBackups" -Path $BackupDir
-                Grant-SmbShareAccess -Name "DbBackups" -AccountName "SQLDEMO\Administrator" -AccessRight Full -Confirm:$false
-                
+                if(Test-Path -Path $BackupDir -PathType Container) {
+                    Remove-Item -Path $BackupDir -Recurse -Force
+                }
+                New-Item -Path $BackupDir -ItemType Directory | Out-Null
+                New-SmbShare -Name "DbBackups" -Path $BackupDir | Out-Null
+                Grant-SmbShareAccess -Name "DbBackups" -AccountName "SQLDEMO\Administrator" -AccessRight Full -Confirm:$false | Out-Null
+
                 $DbName = "northwind"
                 Write-Host "downloading $DbName sql"
                 Invoke-WebRequest -Uri "https://raw.githubusercontent.com/microsoft/sql-server-samples/refs/heads/master/samples/databases/northwind-pubs/instnwnd.sql" `
                     -OutFile "$($DbName).sql"
 
                 Write-Host "Creating $DbName database"
-                Invoke-Sqlcmd -ServerInstance $env:COMPUTERNAME -Query "CREATE DATABASE $DbName"
+                Invoke-Sqlcmd -ServerInstance $env:COMPUTERNAME -Query "IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = '$DbName') BEGIN CREATE DATABASE $DbName END"
                 Write-Host "Executing sql"
                 Invoke-Sqlcmd -ServerInstance $env:COMPUTERNAME -Database $DbName -InputFile "$($DbName).sql"
                 # select some data to verify
-                Invoke-Sqlcmd -ServerInstance $env:COMPUTERNAME -Database $DbName -Query "SELECT FirstName, LastName FROM Employees"
-                
+                Invoke-Sqlcmd -ServerInstance $env:COMPUTERNAME -Database $DbName -Query "SELECT FirstName, LastName FROM Employees" | Out-String
+
                 Write-Host "Backing up $DbName"
                 Invoke-Sqlcmd -ServerInstance $env:COMPUTERNAME -Query "
                 BACKUP DATABASE [$DbName] TO  DISK = N'$($BackupDir)\$DbName.bak' WITH NOFORMAT, NOINIT,  NAME = N'$DbName-Full Database Backup', SKIP, NOREWIND, NOUNLOAD,  STATS = 10
@@ -703,17 +745,17 @@ function Deploy-SQLAlwaysOn {
         }
         Remove-PSSession -Session $remoteSession
     }
-
     # Run generated SQL Script to create availability group, just like the wizard does from SQL Man. Studio
-    $remoteSession = New-PSSession -VMName $vmDbName -Credential $domainAdmin -Name "win25-db01"
+    $vmDbName = "win25-db01"
+    $remoteSession = New-PSSession -VMName $vmDbName -Credential $domainAdmin -Name $vmDbName
     Get-ChildItem -Path sql -File -Filter *.sql | Copy-Item -Destination "C:\Users\Administrator.SQLDEMO\Documents\" -ToSession $remoteSession -Verbose
     Invoke-Command -Session $remoteSession {
         1..3 | ForEach-Object {
-            Invoke-Sqlcmd -ServerInstance "win25-db0$_" -Query "./01-enable-always-on.sql"
+            Invoke-Sqlcmd -ServerInstance "win25-db0$_" -InputFile "01-enable-always-on.sql" | Out-String
         }
-        Invoke-Sqlcmd -ServerInstance "win25-db01" -Query "./02-create-availability-group.sql"
+        Invoke-Sqlcmd -ServerInstance "win25-db01" -InputFile "02-create-availability-group.sql" | Out-String
         2..3 | ForEach-Object {
-            Invoke-Sqlcmd -ServerInstance "win25-db0$_" -Query "./03-join-availability-group.sql"
+            Invoke-Sqlcmd -ServerInstance "win25-db0$_" -InputFile "03-join-availability-group.sql" | Out-String
         }
     }
 }
@@ -736,11 +778,11 @@ This command will do a lot of things. Do not proceed if you are not comfortable 
   6. Creates an application server (with desktop experience)
   7. Sets up a Failover Cluster with the SQL Servers
   8. Deploys SQL Always On Availability Group
-  
+
 While doing all these, it will also:
     - Create base virtual hard disk images, pre-installed with Windows Server 2025
 by mounting hard disks and format partitions.
-    
+
 .EXAMPLE
 PS C:\> Start-Provisioning -Verbose
 #>
@@ -755,7 +797,7 @@ PS C:\> Start-Provisioning -Verbose
         [ValidateNotNullorEmpty()]
         [ValidateScript({ if (Test-Path $_) { $true } else { throw "Download path $_ not found." } })]
         $DownloadPath = "$($env:USERPROFILE)\Downloads",
-        
+
         [Parameter(HelpMessage="Provide the name for external virtual switch.")]
         [ValidateNotNullorEmpty()]
         $ExternalSwitch = "HyperV-External",
@@ -812,13 +854,15 @@ Are you sure you want to continue?", "WARNING!", [ref]$true, [ref]$false, [ref]$
 
             New-Win25DC -EditionIndex 1
 
-            New-Win25DbServers -EditionIndex 1 -DBServers 3
-
             New-Win25AppServer -EditionIndex 2
+
+            New-Win25DbServers -EditionIndex 1 -DBServers 3
 
             Set-FailoverCluster
 
             Deploy-SQLAlwaysOn
+
+            Write-Host "Success 🎉"
 
         } else {
             Write-Error "Operation aborted." -ErrorAction Stop
