@@ -388,7 +388,7 @@ function New-Win25DC {
         Invoke-Command -Session $remoteSession -ArgumentList ($SecurePass | ConvertFrom-SecureString -AsPlainText) -ScriptBlock {
             param($secretText)
             # install AD Forest
-            Install-ADDSForest -DomainName "sqldemo.local" -SafeModeAdministratorPassword ($secretText | ConvertTo-SecureString -AsPlainText -Force) -InstallDNS -Force
+            Install-ADDSForest -DomainName "sqldemo.local" -SafeModeAdministratorPassword ($secretText | ConvertTo-SecureString -AsPlainText -Force) -InstallDNS -Force; Write-Progress -Activity * -Completed; Write-Host -NoNewline
             Set-NetFirewallProfile -Profile Domain -Enabled False -Verbose
             # reset IP configuration
             ipconfig /flushdns
@@ -407,9 +407,9 @@ function New-Win25DC {
         # test connectivity
         Write-Verbose "Testing network connections"
         $networkOk = Invoke-Command -Session $remoteSession -ScriptBlock {
-            $testLan10 = Test-NetConnection -ComputerName "10.10.10.1" -ErrorAction SilentlyContinue
-            $testLan20 = Test-NetConnection -ComputerName "10.20.20.1" -ErrorAction SilentlyContinue
-            $testNet = Test-NetConnection -ComputerName "www.google.com" -ErrorAction SilentlyContinue
+            $testLan10 = Test-NetConnection -ComputerName "10.10.10.1" -ErrorAction SilentlyContinue ; Write-Progress -Activity * -Completed; Write-Host -NoNewline
+            $testLan20 = Test-NetConnection -ComputerName "10.20.20.1" -ErrorAction SilentlyContinue; Write-Progress -Activity * -Completed; Write-Host -NoNewline
+            $testNet = Test-NetConnection -ComputerName "www.google.com" -ErrorAction SilentlyContinue; Write-Progress -Activity * -Completed; Write-Host -NoNewline
             $testLan10.PingSucceeded -and $testLan20.PingSucceeded -and $testNet.PingSucceeded
         }
         Remove-PSSession -Session $remoteSession
@@ -471,15 +471,16 @@ function New-Win25DbServers {
                     -DefaultGateway "10.$($lanIndex).$($lanIndex).1" | Out-Null
                 Set-DnsClientServerAddress -InterfaceAlias "Private-Lan$($lanIndex)" -ServerAddresses "10.10.10.53"
                 Set-NetConnectionProfile -InterfaceAlias "Private-Lan$($lanIndex)" -NetworkCategory Private
-                Start-Sleep -Seconds 5
+                Start-Sleep -Seconds 3
             }
             Write-Verbose (Invoke-Command -Session $remoteSession { ipconfig } | Out-String)
             # join the domain
             Invoke-Command -Session $remoteSession -ArgumentList ($SecurePass | ConvertFrom-SecureString -AsPlainText) {
                 param($secretText)
-                Start-Sleep -Seconds 5
-                Test-NetConnection "sqldemo.local" -InformationLevel Quiet | Out-Null
-                nltest /dsgetdc:sqldemo.local
+                ipconfig /flushdns | Out-Null
+                Start-Sleep -Seconds 2
+                Test-NetConnection "sqldemo.local" -InformationLevel Quiet | Out-Null; Write-Progress -Activity * -Completed; Write-Host -NoNewline
+                Write-Verbose (nltest /dsgetdc:sqldemo.local | Out-String)
                 $domainAdmin = New-Object -TypeName System.Management.Automation.PSCredential("sqldemo\Administrator", ($secretText | ConvertTo-SecureString -AsPlainText -Force))
                 Add-Computer -DomainName "sqldemo.local" -Credential $domainAdmin -ErrorAction Stop
                 Write-Host "$($env:COMPUTERNAME) joined 'sqldemo.local' domain successfully 🤝" -ForegroundColor Green
@@ -524,71 +525,76 @@ function New-Win25AppServer {
         [int]$EditionIndex
     )
     $vmAppName= "win25-app01"
-    $win25AppPath = Join-Path -Path "$($HddPath)" -ChildPath "$($vmAppName).vhdx"
-
-    Deploy-UnattendedXml -VMName $vmAppName -EditionIndex $EditionIndex
-
     if(-not (Get-VM -Name $vmAppName -ErrorAction SilentlyContinue)) {
-        Write-Verbose "Creating new VM: $vmAppName"
-        $win25App = New-VM -Name $vmAppName -Generation 2 -MemoryStartupBytes 1GB -VHDPath $win25AppPath -SwitchName "Private-Lan10"
-        $win25App | Set-VMProps -Processors 2 -MaxMemory 4GB
-    }
+        $win25AppPath = Join-Path -Path "$($HddPath)" -ChildPath "$($vmAppName).vhdx"
 
-    Start-VM $vmAppName -WarningAction SilentlyContinue | Write-Verbose "Starting $vmAppName"
-    $remoteSession = Wait-WinRMSession -VMName $vmAppName -MaxTimeout 60 -SleepTime 5
-    # rename the external network interface
-    Invoke-Command -Session $remoteSession { Get-NetAdapter | Rename-NetAdapter -NewName "Private-Lan10" }
-    Write-Verbose "Updating IP addresses for LAN interfaces"
-    Invoke-Command -Session $remoteSession {
-        New-NetIPAddress -InterfaceAlias "Private-Lan10" -IPAddress "10.10.10.100" -PrefixLength 24 -DefaultGateway "10.10.10.1" | Out-Null
-        Set-DnsClientServerAddress -InterfaceAlias "Private-Lan10" -ServerAddresses "10.10.10.53"
-        Set-NetConnectionProfile -InterfaceAlias "Private-Lan10" -NetworkCategory Private
+        Deploy-UnattendedXml -VMName $vmAppName -EditionIndex $EditionIndex
+
+        if(-not (Get-VM -Name $vmAppName -ErrorAction SilentlyContinue)) {
+            Write-Verbose "Creating new VM: $vmAppName"
+            $win25App = New-VM -Name $vmAppName -Generation 2 -MemoryStartupBytes 1GB -VHDPath $win25AppPath -SwitchName "Private-Lan10"
+            $win25App | Set-VMProps -Processors 2 -MaxMemory 4GB
+        }
+
+        Start-VM $vmAppName -WarningAction SilentlyContinue | Write-Verbose "Starting $vmAppName"
+        $remoteSession = Wait-WinRMSession -VMName $vmAppName -MaxTimeout 60 -SleepTime 5
+        # rename the external network interface
+        Invoke-Command -Session $remoteSession { Get-NetAdapter | Rename-NetAdapter -NewName "Private-Lan10" }
+        Write-Verbose "Updating IP addresses for LAN interfaces"
+        Invoke-Command -Session $remoteSession {
+            New-NetIPAddress -InterfaceAlias "Private-Lan10" -IPAddress "10.10.10.100" -PrefixLength 24 -DefaultGateway "10.10.10.1" | Out-Null
+            Set-DnsClientServerAddress -InterfaceAlias "Private-Lan10" -ServerAddresses "10.10.10.53"
+            Set-NetConnectionProfile -InterfaceAlias "Private-Lan10" -NetworkCategory Private
+        }
+        Start-Sleep -Seconds 5
+        Write-Verbose (Invoke-Command -Session $remoteSession { ipconfig } | Out-String)
+        # join the domain
+        Invoke-Command -Session $remoteSession -ArgumentList ($SecurePass | ConvertFrom-SecureString -AsPlainText) {
+            param($secretText)
+            ipconfig /flushdns | Out-Null
+            Start-Sleep -Seconds 2
+            Test-NetConnection "sqldemo.local" -InformationLevel Quiet | Out-Null; Write-Progress -Activity * -Completed; Write-Host -NoNewline
+            Write-Verbose (nltest /dsgetdc:sqldemo.local | Out-String)
+            $domainAdmin = New-Object -TypeName System.Management.Automation.PSCredential("sqldemo\Administrator", ($secretText | ConvertTo-SecureString -AsPlainText -Force))
+            Add-Computer -DomainName "sqldemo.local" -Credential $domainAdmin
+            Write-Host "$($env:COMPUTERNAME) joined 'sqldemo.local' domain successfully 🤝" -ForegroundColor Green
+            Set-NetFirewallProfile -Profile Domain -Enabled False -Verbose
+            # restart needed after joining domain
+            Restart-Computer -Force
+        }
+        Wait-ServerEvent -VMName $vmAppName -WaitWhile {
+            (Get-PSSession -Name $vmAppName).State -eq "Opened" -and (Get-PSSession -Name $vmAppName).Availability -eq "Available"
+        } -TextMsg "$vmAppName is restarting" -ErrorMsg "max. wait time reached but $vmAppName has not been restarted yet." -MaxTimeout 40 -SleepTime 2
+        $remoteSession = Wait-WinRMSession -VMName $vmAppName -MaxTimeout 120 -SleepTime 5 -AsDomainAdmin
+        Invoke-Command -Session $remoteSession {
+            # install new windows admin center
+            Invoke-WebRequest -Uri "https://aka.ms/WACdownload" -OutFile ".\WindowsAdminCenter.exe"
+            Write-Host "Downloading Windows Admin Center..." -ForegroundColor Cyan
+            Start-Process -FilePath '.\WindowsAdminCenter.exe' -ArgumentList '/VERYSILENT'
+            Write-Host "Windows Admin Center installation file is downloaded." -ForegroundColor Green
+            # only way I could find to upgrade winget to latest version
+            Invoke-WebRequest "https://github.com/microsoft/winget-cli/releases/download/v1.11.400/DesktopAppInstaller_Dependencies.zip" `
+            -UseBasicParsing -OutFile "DesktopAppInstaller_Dependencies.zip"
+            Expand-Archive -Path "DesktopAppInstaller_Dependencies.zip"
+            Add-AppxPackage https://aka.ms/getwinget -DependencyPath .\DesktopAppInstaller_Dependencies\x64\*
+            Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe
+            Add-AppxPackage https://cdn.winget.microsoft.com/cache/source2.msix
+            winget source reset --force
+            Remove-Item -Path "DesktopAppInstaller_Dependencies.zip"
+            Remove-Item -Path "DesktopAppInstaller_Dependencies" -Recurse
+            # install pwsh
+            Write-Host "Installing latest PowerShell..." -ForegroundColor Cyan
+            winget install Microsoft.PowerShell --silent --source winget --disable-interactivity --accept-source-agreements --accept-package-agreements | Out-Null
+            Write-Host "PowerShell is installed." -ForegroundColor Green
+            # install SQL Management Studio 21
+            Write-Host "Starting SQL Server Management Studio 21 installation. This might take some time..." -ForegroundColor Cyan
+            winget install Microsoft.SQLServerManagementStudio.21 --silent --disable-interactivity --accept-source-agreements --accept-package-agreements | Out-Null
+            Write-Host "SQL Server Management Studio 21 is installed." -ForegroundColor Green
+            #Write-Host "If fails, you can manually re-install using installer file on the desktop." -ForegroundColor Cyan
+            #Invoke-WebRequest -Uri "https://aka.ms/ssms/21/release/vs_SSMS.exe" -OutFile "$($Env:USERPROFILE)\Desktop\vs_SSMS.exe"
+        }
+        Remove-PSSession -Session $remoteSession
     }
-    Start-Sleep -Seconds 5
-    Write-Verbose (Invoke-Command -Session $remoteSession { ipconfig } | Out-String)
-    # join the domain
-    Invoke-Command -Session $remoteSession -ArgumentList ($SecurePass | ConvertFrom-SecureString -AsPlainText) {
-        param($secretText)
-        Test-NetConnection "sqldemo.local" -InformationLevel Quiet | Out-Null
-        nltest /dsgetdc:sqldemo.local
-        $domainAdmin = New-Object -TypeName System.Management.Automation.PSCredential("sqldemo\Administrator", ($secretText | ConvertTo-SecureString -AsPlainText -Force))
-        Add-Computer -DomainName "sqldemo.local" -Credential $domainAdmin
-        Write-Host "$($env:COMPUTERNAME) joined 'sqldemo.local' domain successfully 🤝" -ForegroundColor Green
-    }
-    # install WSFC Role w/Management Tools
-    Invoke-Command -Session $remoteSession {
-        Add-WindowsFeature -Name Failover-Clustering -IncludeManagementTools
-        Set-NetFirewallProfile -Profile Domain -Enabled False -Verbose
-        # restart needed after joining domain
-        Restart-Computer -Force
-    }
-    Wait-ServerEvent -VMName $vmAppName -WaitWhile {
-        (Get-PSSession -Name $vmAppName).State -eq "Opened" -and (Get-PSSession -Name $vmAppName).Availability -eq "Available"
-    } -TextMsg "$vmAppName is restarting" -ErrorMsg "max. wait time reached but $vmAppName has not been restarted yet." -MaxTimeout 40 -SleepTime 2
-    $remoteSession = Wait-WinRMSession -VMName $vmAppName -MaxTimeout 120 -SleepTime 5 -AsDomainAdmin
-    Invoke-Command -Session $remoteSession {
-        # only way I could find to upgrade winget to latest version
-        Invoke-WebRequest "https://github.com/microsoft/winget-cli/releases/download/v1.11.400/DesktopAppInstaller_Dependencies.zip" `
-        -UseBasicParsing -OutFile "DesktopAppInstaller_Dependencies.zip"
-        Expand-Archive -Path "DesktopAppInstaller_Dependencies.zip"
-        Add-AppxPackage https://aka.ms/getwinget -DependencyPath .\DesktopAppInstaller_Dependencies\x64\*
-        Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe
-        Add-AppxPackage https://cdn.winget.microsoft.com/cache/source2.msix
-        winget source reset --force
-        Remove-Item -Path "DesktopAppInstaller_Dependencies.zip"
-        Remove-Item -Path "DesktopAppInstaller_Dependencies" -Recurse
-        # install pwsh
-        Write-Host "Installing latest PowerShell..." -ForegroundColor Cyan
-        winget install Microsoft.PowerShell --silent --source winget --disable-interactivity --accept-source-agreements --accept-package-agreements | Out-Null
-        Write-Host "PowerShell is installed." -ForegroundColor Green
-        # install SQL Management Studio 21
-        Write-Host "Starting SQL Server Management Studio 21 installation. This might take some time..." -ForegroundColor Cyan
-        winget install Microsoft.SQLServerManagementStudio.21 --silent --disable-interactivity --accept-source-agreements --accept-package-agreements | Out-Null
-        Write-Host "SQL Server Management Studio 21 is installed." -ForegroundColor Green
-        #Write-Host "If fails, you can manually re-install using installer file on the desktop." -ForegroundColor Cyan
-        #Invoke-WebRequest -Uri "https://aka.ms/ssms/21/release/vs_SSMS.exe" -OutFile "$($Env:USERPROFILE)\Desktop\vs_SSMS.exe"
-    }
-    Remove-PSSession -Session $remoteSession
     Write-Host  "App01`t📐"
 }
 
@@ -609,13 +615,16 @@ function Set-FailoverCluster {
         $IPAddresses = @(1..2 | ForEach-Object { "10.$(10 * $_).$(10 * $_).250" })
         # create the cluster
         Write-Host "Starting to create failover cluster"
-        New-Cluster -Name $ClusterName -Node $DbNodes -StaticAddress $IPAddresses -NoStorage
+        $cluster = New-Cluster -Name $ClusterName -Node $DbNodes -StaticAddress $IPAddresses -NoStorage
+        Write-Verbose ($cluster | Out-String)
+        Write-Host "Cluster created successfully"
+        # for some reason Get-Cluster -Name $ClusterName does not work all the time!
         $clusterGroup = Get-Cluster | Where-Object Name -eq $ClusterName | Get-ClusterGroup | Where-Object Name -eq "Cluster Group"
-        $clusterGroup | Out-Default
+        Write-Verbose ($clusterGroup | Out-String)
         $clusterNodes = Get-Cluster | Where-Object Name -eq $ClusterName | Get-ClusterNode
-        $clusterNodes | Out-Default
+        Write-Verbose ($clusterNodes | Out-String)
         Write-Host "Waiting for cluster to be online" -ForegroundColor Cyan -NoNewline
-        $maxWaitCycle = 10
+        $maxWaitCycle = 5
         $clusterGroup = Get-Cluster | Where-Object Name -eq $ClusterName | Get-ClusterGroup | Where-Object Name -eq "Cluster Group"
         do {
             if($clusterGroup.State -eq "Online") { break }
@@ -627,37 +636,31 @@ function Set-FailoverCluster {
             }
             $clusterGroup = Get-Cluster | Where-Object Name -eq $ClusterName | Get-ClusterGroup | Where-Object Name -eq "Cluster Group"
         } while ($true)
+        Write-Host
         # change some cluster perameters for multi-subnet clusters
         $clusterResource = Get-ClusterResource | Where-Object { $_.ResourceType -eq "Network Name" }
-        $clusterResource | Get-ClusterParameter | Where-Object { $_.Name -eq "HostRecordTTL" -or $_.Name -eq "RegisterAllProvidersIP" }
         $clusterResource | Set-ClusterParameter RegisterAllProvidersIP 0
         $clusterResource | Set-ClusterParameter HostRecordTTL 60
-        $clusterResource | Get-ClusterParameter | Where-Object { $_.Name -eq "HostRecordTTL" -or $_.Name -eq "RegisterAllProvidersIP" }
-        # TODO: These should run after AG creation
-        # updating Lease timeout
-        #$clusterAG = Get-ClusterResource | Where-Object { $_.ResourceType -like "SQL Server Availability Group" }
-        #$clusterAG | Get-ClusterParameter LeaseTimeout
-        #$clusterAG | Set-ClusterParameter LeaseTimeout 30000
-        #$clusterAG | Get-ClusterParameter LeaseTimeout
+        Write-Verbose ($clusterResource | Get-ClusterParameter | Where-Object { $_.Name -eq "HostRecordTTL" -or $_.Name -eq "RegisterAllProvidersIP" } | Out-String)
         # updating Subnet delays for multi-subnet clusters
-        Get-Cluster | Format-List "*subnet*"
         (Get-Cluster).SameSubnetDelay = 1000
         (Get-Cluster).SameSubnetThreshold = 30
         (Get-Cluster).CrossSubnetDelay = 2000
         (Get-Cluster).CrossSubnetThreshold = 100
-        Get-Cluster | Format-List "*subnet*"
+        Write-Verbose (Get-Cluster | Format-List "*subnet*" | Out-String)
         # restart to take effect
-        $clusterResource | Stop-ClusterResource
-        $clusterResource | Start-ClusterResource
-        Start-ClusterGroup $clusterResource.OwnerGroup.Name
+        $clusterResource | Stop-ClusterResource | Out-Null
+        $clusterResource | Start-ClusterResource | Out-Null
+        Start-ClusterGroup $clusterResource.OwnerGroup.Name | Out-Null
         # simulate a failover by moving the cluster group to each node
-        $ownerNode = (Get-ClusterOwnerNode -Group $clusterGroup | Select-Object -ExpandProperty OwnerNodes).Name
+        $ownerNode = (Get-Cluster | Where-Object Name -eq $ClusterName | Get-ClusterGroup | Where-Object Name -eq "Cluster Group").OwnerNode.Name
         Write-Host "Current Owner: $ownerNode" -ForegroundColor Green
-        $clusterNodes | Where-Object { $_ -notin $ownerNode } | ForEach-Object {
-            Move-ClusterGroup -Name "Cluster Group" -Node $_.Name -Verbose -ErrorAction Stop
-            Write-Host "Move-ClusterGroup to $($_.Name) is completed. Waiting for 5s..." -ForegroundColor Cyan
-            Start-Sleep -Seconds 5
-            $ownerNode = (Get-ClusterOwnerNode -Group $clusterGroup | Select-Object -ExpandProperty OwnerNodes).Name
+        $clusterNodes | Where-Object { $_.Name -notin $ownerNode } | ForEach-Object {
+            Move-ClusterGroup -Name "Cluster Group" -Node $_.Name -Verbose -ErrorAction Stop | Out-Null
+            Write-Host "Move-ClusterGroup to $($_.Name) is completed. Waiting for 3s..." -ForegroundColor Cyan
+            Start-Sleep -Seconds 3
+            ipconfig /flushdns | Out-Null
+            $ownerNode = (Get-Cluster | Where-Object Name -eq $ClusterName | Get-ClusterGroup | Where-Object Name -eq "Cluster Group").OwnerNode.Name
             Write-Host "Current Owner: $ownerNode" -ForegroundColor Green
             if ($clusterGroup.State -ne "Online")
             {
@@ -667,7 +670,7 @@ function Set-FailoverCluster {
             }
         }
         Set-ClusterOwnerNode -Group $clusterGroup -Owners "win25-db01" -Verbose
-        Move-ClusterGroup -Name "Cluster Group" -Node "win25-db01" -Verbose -ErrorAction Stop
+        Move-ClusterGroup -Name "Cluster Group" -Node "win25-db01" -Verbose -ErrorAction Stop | Out-Null
         Get-ClusterOwnerNode -Group $clusterGroup
         Get-ClusterQuorum | Select-Object Cluster,QuorumResource,QuorumType
 
@@ -708,10 +711,10 @@ function Deploy-SQLAlwaysOn {
             if($index -eq 1) {
                 $BackupDir = "C:\Backups"
                 if(Test-Path -Path $BackupDir -PathType Container) {
-                    Remove-Item -Path $BackupDir -Recurse -Force
+                    Remove-Item -Path $BackupDir -Recurse -Force -ErrorAction SilentlyContinue
                 }
-                New-Item -Path $BackupDir -ItemType Directory | Out-Null
-                New-SmbShare -Name "DbBackups" -Path $BackupDir | Out-Null
+                New-Item -Path $BackupDir -ItemType Directory -ErrorAction SilentlyContinue | Out-Null
+                New-SmbShare -Name "DbBackups" -Path $BackupDir -ErrorAction SilentlyContinue | Out-Null
                 Grant-SmbShareAccess -Name "DbBackups" -AccountName "SQLDEMO\Administrator" -AccessRight Full -Confirm:$false | Out-Null
 
                 $DbName = "northwind"
@@ -734,6 +737,7 @@ function Deploy-SQLAlwaysOn {
                 GO" -Verbose -ErrorAction Stop
             }
 
+            Disable-SqlAlwaysOn -ServerInstance $env:COMPUTERNAME -Force -Verbose -Confirm:$false
             Enable-SqlAlwaysOn -ServerInstance $env:COMPUTERNAME -Force -Verbose -Confirm:$false
 
             Invoke-Sqlcmd -ServerInstance $env:COMPUTERNAME -Query "SELECT `
@@ -751,13 +755,21 @@ function Deploy-SQLAlwaysOn {
     Get-ChildItem -Path sql -File -Filter *.sql | Copy-Item -Destination "C:\Users\Administrator.SQLDEMO\Documents\" -ToSession $remoteSession -Verbose
     Invoke-Command -Session $remoteSession {
         1..3 | ForEach-Object {
-            Invoke-Sqlcmd -ServerInstance "win25-db0$_" -InputFile "01-enable-always-on.sql" | Out-String
+            Invoke-Sqlcmd -ServerInstance "win25-db0$_" -InputFile "01-enable-always-on.sql" | Format-Table
         }
-        Invoke-Sqlcmd -ServerInstance "win25-db01" -InputFile "02-create-availability-group.sql" | Out-String
+        Invoke-Sqlcmd -ServerInstance "win25-db01" -InputFile "02-create-availability-group.sql"
         2..3 | ForEach-Object {
-            Invoke-Sqlcmd -ServerInstance "win25-db0$_" -InputFile "03-join-availability-group.sql" | Out-String
+            Invoke-Sqlcmd -ServerInstance "win25-db0$_" -InputFile "03-join-availability-group.sql"
         }
+        Start-Sleep -Seconds 3
+        Invoke-Sqlcmd -ServerInstance "win25-db01" -InputFile "04-check-replicas.sql" | Format-Table
+        # should run after AG creation to update Lease timeout
+        $clusterAG = Get-ClusterResource | Where-Object { $_.ResourceType -like "SQL Server Availability Group" }
+        $clusterAG | Set-ClusterParameter LeaseTimeout 30000
+        Write-Verbose ($clusterAG | Get-ClusterParameter LeaseTimeout | Out-String)
     }
+    Remove-PSSession $remoteSession
+    Write-Host "HA`t✨"
 }
 
 function Start-Provisioning {
